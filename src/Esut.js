@@ -47,11 +47,9 @@ export default class WebglCanvas extends React.Component {
         this.biltShader = CreateShader(this.gl, defaultVertexShader, defaultFragmentShader);
         this.gl.useProgram(this.biltShader);
 
-        // 获取着色器程序中的变量
         const positionLocation = this.gl.getAttribLocation(this.biltShader, "a_position");
         const textureLocation = this.gl.getAttribLocation(this.biltShader, "a_texCoord");
 
-        // 启用顶点属性
         this.gl.enableVertexAttribArray(positionLocation);
         this.gl.enableVertexAttribArray(textureLocation);
 
@@ -63,16 +61,7 @@ export default class WebglCanvas extends React.Component {
     }
 
     updateGL() {
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.frameBufferA);
-        this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-
-        this.gl.activeTexture(this.gl.TEXTURE0);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.glTexture);
-        this.gl.uniform1i(this.gl.getUniformLocation(this.biltShader, "u_texture"), 0);
-
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.frameBufferA);
-        this.gl.viewport(0, 0, this.glCanvas.width, this.glCanvas.height);
-        this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+        BlitTexture(this.gl, this.glTexture, this.frameBufferA, this.biltShader, this.glCanvas.width, this.glCanvas.height);
 
         let srcFrameBuffer = this.frameBufferA;
         let dstFrameBuffer = this.frameBufferB;
@@ -91,7 +80,7 @@ export default class WebglCanvas extends React.Component {
             dstTexture = tempTex;
         }
 
-        // 最后一次写到屏幕
+        // Draw to canvas
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
         this.gl.viewport(0, 0, this.glCanvas.width, this.glCanvas.height);
         this.gl.useProgram(this.biltShader);
@@ -105,9 +94,7 @@ export default class WebglCanvas extends React.Component {
         this.time = 0;
 
         this.state = {
-            imgUrl: this.props.imgUrl,
-            filters: this.props.filters || [],
-            isStatic: this.props.isStatic || false
+            imgUrl: this.props.imgUrl, filters: this.props.filters || [], isStatic: this.props.isStatic || false
         }
     }
 
@@ -155,7 +142,6 @@ const defaultVertexShader = `#version 300 es
     void main() {
         v_texCoord = vec2(a_texCoord.x, a_texCoord.y);
         gl_Position = vec4(a_position.xy, 0.0, 1.0);
-        
     }
 `;
 const defaultFragmentShader = `#version 300 es
@@ -169,15 +155,24 @@ const defaultFragmentShader = `#version 300 es
     }
 `;
 
-function Blit(gl, src, dst, width, height) {
+function Blit(gl, src, dst, srcWidth, srcHeight, dstWidth, dstHeight) {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, src);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, dst);
-    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.LINEAR);
-
+    gl.blitFramebuffer(0, 0, srcWidth, srcHeight, 0, 0, dstWidth, dstHeight, gl.COLOR_BUFFER_BIT, gl.LINEAR);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 
-function CreateShader(gl, vert, frag) {
+function BlitTexture(gl, srcTex, dstFbo, shader, width, height, setUniforms = () => {
+}) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
+    gl.viewport(0, 0, width, height);
+    gl.useProgram(shader);
+    setUniforms();
+    gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function CreateShader(gl, vert, frag, notBindTexture = false) {
     const vertexShaderObj = gl.createShader(gl.VERTEX_SHADER);
     gl.shaderSource(vertexShaderObj, vert);
     gl.compileShader(vertexShaderObj);
@@ -199,8 +194,13 @@ function CreateShader(gl, vert, frag) {
         console.log(gl.getProgramInfoLog(shader));
     }
 
+    if (!notBindTexture) {
+        gl.useProgram(shader);
+        gl.uniform1i(gl.getUniformLocation(shader, "u_image"), 0);
+    }
     return shader;
 }
+
 function CreateFrameBuffer(gl, width, height) {
     const frameBuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuffer);
@@ -214,6 +214,11 @@ function CreateFrameBuffer(gl, width, height) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        console.log("Framebuffer is not complete.");
+    }
+
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
@@ -223,6 +228,7 @@ function CreateFrameBuffer(gl, width, height) {
 
 /* Filters */
 
+// This filter need canvas setting "isStatic: false"
 export function WaveFilter(gl, param) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
@@ -256,9 +262,7 @@ export function WaveFilter(gl, param) {
     const program = CreateShader(gl, vert, frag);
 
     let time = 0;
-    setInterval(() => {
-        time += 1000 / 60;
-    }, 1000 / 60);
+    setInterval(() => time += 1000 / 60, 1000 / 60);
 
     if (param === null || param === undefined) {
         param = {
@@ -266,117 +270,17 @@ export function WaveFilter(gl, param) {
         }
     }
 
-    return function (srcTexture, dstFbo) {
-        gl.useProgram(program);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, srcTexture);
-        gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_time"), time);
         gl.uniform2f(gl.getUniformLocation(program, "u_textureSize"), gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.uniform1f(gl.getUniformLocation(program, "u_amplitude"), param.amplitude);
         gl.uniform1f(gl.getUniformLocation(program, "u_frequency"), param.frequency);
         gl.uniform1f(gl.getUniformLocation(program, "u_speed"), param.speed);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
-
-}
-
-export function BoxBlurFilter(gl, param) {
-    const vert = defaultVertexShader;
-    const frag = `#version 300 es
-        precision mediump float;
-        in vec2 v_texCoord;
-        out vec4 fragColor;
-        
-        uniform sampler2D u_image;
-        uniform vec2 u_textureSize;
-        uniform vec2 u_radius;
-        
-        void main() {
-            vec4 d = u_radius.xyxy * vec4(-1.0, -1.0, 1.0, 1.0);
-
-            vec4 color = texture(u_image, v_texCoord + d.xy) * 0.25;
-            color += texture(u_image, v_texCoord + d.zy) * 0.25;
-            color += texture(u_image, v_texCoord + d.xw) * 0.25;
-            color += texture(u_image, v_texCoord + d.zw) * 0.25;
-            
-            fragColor = color;   
-        }
-          
-    `;
-
-    const program = CreateShader(gl, vert, frag);
-    const blitProgram = CreateShader(gl, defaultVertexShader, defaultFragmentShader);
-
-    if (param === null || param === undefined) {
-        param = {
-            radius: 1.6, iterations: 3, downScale: 3
-        }
-    }
-
-    const rtWidth = gl.drawingBufferWidth / param.downScale;
-    const rtHeight = gl.drawingBufferHeight / param.downScale;
-
-    const [faoA, texA] = CreateFrameBuffer(gl, rtWidth, rtHeight);
-    const [faoB, texB] = CreateFrameBuffer(gl, rtWidth, rtHeight);
-
-    const radiusWidth = param.radius / rtWidth;
-    const radiusHeight = param.radius / rtHeight;
-
-    return function (srcTexture, dstFbo) {
-        gl.useProgram(blitProgram);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, faoA);
-        gl.viewport(0, 0, rtWidth, rtHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, srcTexture);
-        gl.uniform1i(gl.getUniformLocation(blitProgram, "u_image"), 0);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-        for (let i = 0; i < param.iterations; i++) {
-            gl.useProgram(program);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, faoB);
-            gl.viewport(0, 0, rtWidth, rtHeight);
-            gl.clearColor(0, 0, 0, 0);
-
-            gl.bindTexture(gl.TEXTURE_2D, texA);
-            gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
-            gl.uniform2f(gl.getUniformLocation(program, "u_textureSize"), gl.drawingBufferWidth, gl.drawingBufferHeight);
-            gl.uniform2f(gl.getUniformLocation(program, "u_radius"), radiusWidth, radiusHeight);
-
-            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-            gl.bindFramebuffer(gl.FRAMEBUFFER, faoA);
-            gl.viewport(0, 0, rtWidth, rtHeight);
-            gl.clearColor(0, 0, 0, 0);
-
-            gl.bindTexture(gl.TEXTURE_2D, texB);
-            gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
-            gl.uniform2f(gl.getUniformLocation(program, "u_textureSize"), gl.drawingBufferWidth, gl.drawingBufferHeight);
-            gl.uniform2f(gl.getUniformLocation(program, "u_radius"), radiusWidth, radiusHeight);
-
-            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-        }
-
-        gl.useProgram(blitProgram);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, texA);
-        gl.uniform1i(gl.getUniformLocation(blitProgram, "u_image"), 0);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
+    });
 }
 
 export function RevertFilter(gl, param) {
-const vert = defaultVertexShader;
+    const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
         in vec2 v_texCoord;
@@ -393,18 +297,7 @@ const vert = defaultVertexShader;
 
     const program = CreateShader(gl, vert, frag);
 
-    return function (srcTexture, dstFbo) {
-        gl.useProgram(program);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, srcTexture);
-        gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
-
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight);
 }
 
 export function TintFilter(gl, param) {
@@ -432,18 +325,9 @@ export function TintFilter(gl, param) {
         }
     }
 
-    return function (srcTexture, dstFbo) {
-        gl.useProgram(program);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, srcTexture);
-        gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
-        gl.uniform3f(gl.getUniformLocation(program, "u_tint"), param.tint[0], param.tint[1], param.tint[2]);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
+        gl.uniform3fv(gl.getUniformLocation(program, "u_tint"), param.tint);
+    });
 }
 
 export function BrightnessFilter(gl, param) {
@@ -471,18 +355,9 @@ export function BrightnessFilter(gl, param) {
         }
     }
 
-    return function (srcTexture, dstFbo) {
-        gl.useProgram(program);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, srcTexture);
-        gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_brightness"), param.brightness);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
+    });
 }
 
 export function ContrastFilter(gl, param) {
@@ -510,18 +385,9 @@ export function ContrastFilter(gl, param) {
         }
     }
 
-    return function (srcTexture, dstFbo) {
-        gl.useProgram(program);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, srcTexture);
-        gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_contrast"), param.contrast);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
+    });
 }
 
 export function SaturationFilter(gl, param) {
@@ -550,18 +416,9 @@ export function SaturationFilter(gl, param) {
         }
     }
 
-    return function (srcTexture, dstFbo) {
-        gl.useProgram(program);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, srcTexture);
-        gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_saturation"), param.saturation);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
+    });
 }
 
 export function HueFilter(gl, param) {
@@ -576,8 +433,27 @@ export function HueFilter(gl, param) {
         
         void main() {
             vec4 color = texture(u_image, v_texCoord);
-            float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-            fragColor = vec4(mix(vec3(gray), color.rgb, u_hue), color.a);   
+            // to hsv space(https://www.rapidtables.com/convert/color/hsv-to-rgb.html)
+            float cmax = max(color.r, max(color.g, color.b));
+            float cmin = min(color.r, min(color.g, color.b));
+            float delta = cmax - cmin;
+            
+            float hue = delta == 0.0 ? 0.0 : cmax == color.r ? mod((color.g - color.b) / delta, 6.0) : cmax == color.g ? (color.b - color.r) / delta + 2.0 : (color.r - color.g) / delta + 4.0;
+            hue *= 60.0;
+            hue += u_hue;
+            hue = mod(hue, 360.0);
+            
+            float saturation = cmax == 0.0 ? 0.0 : delta / cmax;
+            float value = cmax;
+            
+            // to rgb space(https://www.rapidtables.com/convert/color/rgb-to-hsv.html)
+            float c = value * saturation;
+            float x = c * (1.0 - abs(mod(hue / 60.0, 2.0) - 1.0));
+            float m = value - c;
+            
+            vec3 rgb = hue < 60.0 ? vec3(c, x, 0.0) : hue < 120.0 ? vec3(x, c, 0.0) : hue < 180.0 ? vec3(0.0, c, x) : hue < 240.0 ? vec3(0.0, x, c) : hue < 300.0 ? vec3(x, 0.0, c) : vec3(c, 0.0, x);
+            fragColor = vec4(rgb + m, color.a);
+       
         }
           
     `;
@@ -586,20 +462,232 @@ export function HueFilter(gl, param) {
 
     if (param === null || param === undefined) {
         param = {
-            hue: 1
+            hue: 0
         }
     }
 
-    return function (srcTexture, dstFbo) {
-        gl.useProgram(program);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        gl.clearColor(0, 0, 0, 0);
-
-        gl.bindTexture(gl.TEXTURE_2D, srcTexture);
-        gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_hue"), param.hue);
+    });
+}
 
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+export function GreyScaleFilter(gl, param) {
+    const vert = defaultVertexShader;
+    const frag = `#version 300 es
+        precision mediump float;
+        in vec2 v_texCoord;
+        out vec4 fragColor;
+        
+        uniform sampler2D u_image;
+        uniform float u_greyScale;
+        
+        void main() {
+            vec4 color = texture(u_image, v_texCoord);
+            float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+            fragColor = vec4(mix(vec3(gray), color.rgb, 1.0 - clamp(u_greyScale, 0.0, 1.0)), color.a);
+        } 
+    `;
+
+    const program = CreateShader(gl, vert, frag);
+    if (param === null || param === undefined) {
+        param = {
+            greyScale: 0
+        }
     }
+
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
+        gl.uniform1f(gl.getUniformLocation(program, "u_greyScale"), param.greyScale);
+    });
+}
+
+export function BoxBlurFilter(gl, param) {
+    const vert = defaultVertexShader;
+    const frag = `#version 300 es
+        precision mediump float;
+        in vec2 v_texCoord;
+        out vec4 fragColor;
+        
+        uniform sampler2D u_image;
+        uniform vec2 u_radius;
+        
+        void main() {
+            vec4 d = u_radius.xyxy * vec4(-1.0, -1.0, 1.0, 1.0);
+
+            vec4 color = texture(u_image, v_texCoord + d.xy) * 0.25;
+            color += texture(u_image, v_texCoord + d.zy) * 0.25;
+            color += texture(u_image, v_texCoord + d.xw) * 0.25;
+            color += texture(u_image, v_texCoord + d.zw) * 0.25;
+            
+            fragColor = color;   
+        }
+          
+    `;
+
+    const program = CreateShader(gl, vert, frag);
+    const blitProgram = CreateShader(gl, defaultVertexShader, defaultFragmentShader);
+
+    if (param === null || param === undefined) {
+        param = {
+            radius: 1.6, iterations: 3, downScale: 3
+        }
+    }
+    const rtWidth = gl.drawingBufferWidth / param.downScale;
+    const rtHeight = gl.drawingBufferHeight / param.downScale;
+
+    const [fboA, texA] = CreateFrameBuffer(gl, rtWidth, rtHeight);
+    const [fboB, texB] = CreateFrameBuffer(gl, rtWidth, rtHeight);
+
+    const radiusWidth = param.radius / rtWidth;
+    const radiusHeight = param.radius / rtHeight;
+
+    return function (srcTexture, dstFbo) {
+        BlitTexture(gl, srcTexture, fboA, blitProgram, rtWidth, rtHeight);
+
+        for (let i = 0; i < param.iterations; i++) {
+            BlitTexture(gl, texA, fboB, program, rtWidth, rtHeight, () => {
+                gl.uniform2f(gl.getUniformLocation(program, "u_radius"), radiusWidth, radiusHeight);
+            });
+
+            BlitTexture(gl, texB, fboA, program, rtWidth, rtHeight, () => {
+                gl.uniform2f(gl.getUniformLocation(program, "u_radius"), radiusWidth, radiusHeight);
+            });
+        }
+
+        Blit(gl, fboA, dstFbo, rtWidth, rtHeight, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    }
+}
+
+export function GaussianBlurFilter(gl, param) {
+    const vert = defaultVertexShader;
+    const frag = `#version 300 es
+        precision mediump float;
+        in vec2 v_texCoord;
+        out vec4 fragColor;
+        
+        uniform sampler2D u_image;
+        uniform vec2 u_radius;
+        
+        void main() {
+            // 高斯卷积核 1x7 7x1 [1, 6, 15, 20, 15, 6, 1]
+           
+            vec2 offset[7] = vec2[](
+                vec2(0.0, 0.0),
+                vec2(1.0, 1.0),
+                vec2(2.0, 2.0),
+                vec2(3.0, 3.0),
+                vec2(-1.0, -1.0),
+                vec2(-2.0, -2.0),
+                vec2(-3.0, -3.0)
+            );
+            
+            vec4 color = vec4(0.0);
+            color += texture(u_image, v_texCoord + offset[0] * u_radius) * 0.3125;
+            color += texture(u_image, v_texCoord + offset[1] * u_radius) * 0.234375;
+            color += texture(u_image, v_texCoord + offset[2] * u_radius) * 0.09375;
+            color += texture(u_image, v_texCoord + offset[3] * u_radius) * 0.015625;
+            color += texture(u_image, v_texCoord + offset[4] * u_radius) * 0.234375;
+            color += texture(u_image, v_texCoord + offset[5] * u_radius) * 0.09375;
+            color += texture(u_image, v_texCoord + offset[6] * u_radius) * 0.015625;
+            
+            fragColor = color;
+        }
+    `;
+
+    const program = CreateShader(gl, vert, frag);
+    const blitProgram = CreateShader(gl, defaultVertexShader, defaultFragmentShader);
+
+    if (param === null || param === undefined) {
+        param = {
+            radius: 1.6, iterations: 3, downScale: 3
+        }
+    }
+
+    const rtWidth = gl.drawingBufferWidth / param.downScale;
+    const rtHeight = gl.drawingBufferHeight / param.downScale;
+
+    const [fboA, texA] = CreateFrameBuffer(gl, rtWidth, rtHeight);
+    const [fboB, texB] = CreateFrameBuffer(gl, rtWidth, rtHeight);
+
+    const radiusWidth = param.radius / rtWidth;
+    const radiusHeight = param.radius / rtHeight;
+
+    return function (srcTexture, dstFbo) {
+        BlitTexture(gl, srcTexture, fboA, blitProgram, rtWidth, rtHeight);
+
+        for (let i = 0; i < param.iterations; i++) {
+            BlitTexture(gl, texA, fboB, program, rtWidth, rtHeight, () => {
+                gl.uniform2f(gl.getUniformLocation(program, "u_radius"), radiusWidth, 0);
+            });
+            BlitTexture(gl, texB, fboA, program, rtWidth, rtHeight, () => {
+                gl.uniform2f(gl.getUniformLocation(program, "u_radius"), 0, radiusHeight);
+            });
+        }
+
+        Blit(gl, fboA, dstFbo, rtWidth, rtHeight, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    }
+}
+
+export function GrainyBlurFilter(gl, param) {
+    const vert = defaultVertexShader;
+    const frag = `#version 300 es
+        precision mediump float;
+        in vec2 v_texCoord;
+        out vec4 fragColor;
+        
+        uniform sampler2D u_image;
+        uniform vec2 u_radius;
+        uniform float u_iteration;
+        
+        float rand(vec2 n) {
+            return sin(dot(n, vec2(1233.224, 1743.335)));
+        }
+        
+        void main() {
+            vec2 randomOffset = vec2(0.0);
+            vec4 color = vec4(0.0);
+            float random = rand(v_texCoord);
+            int iteration = int(u_iteration);
+            for (int i = 0; i < iteration; i++) {
+                random = fract(43758.5453 * random + 0.61432);
+                randomOffset.x = (random - 0.5) * 2.0;
+                random = fract(43758.5453 * random + 0.61432);
+                randomOffset.y = (random - 0.5) * 2.0;
+                
+                color += texture(u_image, v_texCoord + randomOffset * u_radius);
+            }
+            
+            fragColor = color / u_iteration;
+        }
+    `;
+
+    const program = CreateShader(gl, vert, frag);
+
+    if (param === null || param === undefined) {
+        param = {
+            radius: 1.6, iterations: 3, downScale: 3
+        }
+    }
+
+    const rtWidth = gl.drawingBufferWidth / param.downScale;
+    const rtHeight = gl.drawingBufferHeight / param.downScale;
+
+    const radiusWidth = param.radius / gl.drawingBufferWidth;
+    const radiusHeight = param.radius / gl.drawingBufferHeight;
+
+    const [fbo] = CreateFrameBuffer(gl, rtWidth, rtHeight);
+
+    return (srcTexture, dstFbo) => {
+        if (param.downScale === 1) {
+            BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
+                gl.uniform2f(gl.getUniformLocation(program, "u_radius"), radiusWidth, radiusHeight);
+                gl.uniform1f(gl.getUniformLocation(program, "u_iteration"), param.iterations);
+            });
+        } else {
+            BlitTexture(gl, srcTexture, fbo, program, rtWidth, rtHeight, () => {
+                gl.uniform2f(gl.getUniformLocation(program, "u_radius"), radiusWidth, radiusHeight);
+                gl.uniform1f(gl.getUniformLocation(program, "u_iteration"), param.iterations);
+            });
+            Blit(gl, fbo, dstFbo, rtWidth, rtHeight, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        }
+    };
 }
