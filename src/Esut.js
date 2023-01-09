@@ -117,7 +117,7 @@ export default class WebglCanvas extends React.Component {
             this.initGL();
 
             this.filters = this.state.filters.map((obj) => {
-                return obj.filter(this.gl, obj.params);
+                return obj.filter(this.gl, obj.params, obj.callback);
             });
 
             this.updateGL();
@@ -184,6 +184,10 @@ const defaultFragmentShader = `#version 300 es
         fragColor = texture(u_image, v_texCoord);
     }
 `;
+
+function Clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
 
 function Blit(gl, src, dst, srcWidth, srcHeight, dstWidth, dstHeight) {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, src);
@@ -264,8 +268,7 @@ export async function GetBase64FilterPicture(imgUrl, filters) {
 
 /* Filters */
 
-// This filter need canvas setting "isStatic: false"
-export function WaveFilter(gl, param) {
+export function WaveFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -306,6 +309,10 @@ export function WaveFilter(gl, param) {
         }
     }
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_time"), time);
         gl.uniform2f(gl.getUniformLocation(program, "u_textureSize"), gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -315,7 +322,7 @@ export function WaveFilter(gl, param) {
     });
 }
 
-export function RevertFilter(gl, param) {
+export function RevertFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -333,10 +340,14 @@ export function RevertFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight);
 }
 
-export function TintFilter(gl, param) {
+export function TintFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -357,8 +368,14 @@ export function TintFilter(gl, param) {
 
     if (param === undefined || Object.values(param).length === 0) {
         param = {
-            tint: [1, 1, 1]
+            tint: [255, 255, 255]
         }
+    }
+
+    param.tint.forEach((value, index) => param.tint[index] = Clamp(value, 0, 255) / 255);
+
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
     }
 
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
@@ -366,7 +383,7 @@ export function TintFilter(gl, param) {
     });
 }
 
-export function BrightnessFilter(gl, param) {
+export function BrightnessFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -391,12 +408,16 @@ export function BrightnessFilter(gl, param) {
         }
     }
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_brightness"), param.brightness);
     });
 }
 
-export function ContrastFilter(gl, param) {
+export function ContrastFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -421,12 +442,16 @@ export function ContrastFilter(gl, param) {
         }
     }
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_contrast"), param.contrast);
     });
 }
 
-export function SaturationFilter(gl, param) {
+export function SaturationFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -452,12 +477,16 @@ export function SaturationFilter(gl, param) {
         }
     }
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_saturation"), param.saturation);
     });
 }
 
-export function HueFilter(gl, param) {
+export function HueFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -502,12 +531,16 @@ export function HueFilter(gl, param) {
         }
     }
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_hue"), param.hue);
     });
 }
 
-export function GreyScaleFilter(gl, param) {
+export function GreyScaleFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -530,13 +563,18 @@ export function GreyScaleFilter(gl, param) {
             greyScale: 0
         }
     }
+    param.greyScale = Clamp(param.greyScale, 0, 1);
+
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
 
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_greyScale"), param.greyScale);
     });
 }
 
-export function BoxBlurFilter(gl, param) {
+export function BoxBlurFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -561,12 +599,17 @@ export function BoxBlurFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
     const blitProgram = CreateShader(gl, defaultVertexShader, defaultFragmentShader);
-    console.log(param);
+
     if (param === undefined || Object.values(param).length === 0) {
         param = {
             radius: 1.6, iterations: 3, downScale: 3
         }
     }
+
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     const rtWidth = gl.drawingBufferWidth / param.downScale;
     const rtHeight = gl.drawingBufferHeight / param.downScale;
 
@@ -594,7 +637,7 @@ export function BoxBlurFilter(gl, param) {
 }
 
 // Parameters: radius, iterations, downScale
-export function GaussianBlurFilter(gl, param) {
+export function GaussianBlurFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -639,6 +682,10 @@ export function GaussianBlurFilter(gl, param) {
         }
     }
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     const rtWidth = gl.drawingBufferWidth / param.downScale;
     const rtHeight = gl.drawingBufferHeight / param.downScale;
 
@@ -664,7 +711,7 @@ export function GaussianBlurFilter(gl, param) {
     }
 }
 
-export function GrainyBlurFilter(gl, param) {
+export function GrainyBlurFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
         precision mediump float;
@@ -705,6 +752,10 @@ export function GrainyBlurFilter(gl, param) {
         }
     }
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     const rtWidth = gl.drawingBufferWidth / param.downScale;
     const rtHeight = gl.drawingBufferHeight / param.downScale;
 
@@ -729,7 +780,7 @@ export function GrainyBlurFilter(gl, param) {
     };
 }
 
-export function GranTurismoFilter(gl, param) {
+export function GranTurismoFilter(gl, param, callback) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
 precision mediump float;
@@ -803,14 +854,18 @@ void main() {
         }
     }
 
-    param.intensity = param.intensity > 1 ? 1 : param.intensity < 0 ? 0 : param.intensity; // clamp(0, 1, intensity)
+    param.intensity = Clamp(param.intensity, 0, 1);
+
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
 
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
         gl.uniform1f(gl.getUniformLocation(program, "u_intensity"), param.intensity);
     });
 }
 
-export function EdgeDetectionFilter(gl, param) {
+export function EdgeDetectionFilter(gl, param, callback) {
     // Sobel算子
     const vert = `#version 300 es
     precision mediump float;
@@ -845,7 +900,7 @@ export function EdgeDetectionFilter(gl, param) {
     out vec4 fragColor;
     
     uniform sampler2D u_image;
-    uniform float u_threshold;
+    uniform float u_intensity;
     uniform vec3 u_edgeColor;
     uniform vec3 u_backgroundColor;
     uniform int u_edgeOnly;
@@ -880,8 +935,9 @@ export function EdgeDetectionFilter(gl, param) {
     
     void main() {
         float edge = sobel();
+        edge = smoothstep(0.0, 1.0, edge);
         vec3 color = texture(u_image, v_texCoord).rgb;
-        vec3 withEdgeColor = mix(mix(u_edgeColor, color, edge), color, 1.0 - u_threshold);
+        vec3 withEdgeColor = mix(mix(u_edgeColor, color, edge), color, 1.0 - u_intensity);
         vec3 onlyEdgeColor = mix(u_edgeColor, u_backgroundColor, edge);
         
         fragColor = vec4(mix(withEdgeColor, onlyEdgeColor, float(u_edgeOnly)), 1.0);
@@ -891,23 +947,60 @@ export function EdgeDetectionFilter(gl, param) {
     const program = CreateShader(gl, vert, frag);
     if (param === undefined || Object.values(param).length === 0) {
         param = {
-            threshold: 0.5,
+            intensity: 0.5,
             edgeColor: [0, 0, 0],
-            backgroundColor: [1, 1, 1],
+            backgroundColor: [255, 255, 255],
             edgeOnly: true
         }
     }
 
-    param.threshold = param.threshold > 1 ? 1 : param.threshold < 0 ? 0 : param.threshold; // clamp(0, 1, threshold)
-    param.edgeColor = param.edgeColor.map(v => v > 1 ? 1 : v < 0 ? 0 : v); // clamp(0, 1, edgeColor)
-    param.backgroundColor = param.backgroundColor.map(v => v > 1 ? 1 : v < 0 ? 0 : v); // clamp(0, 1, backgroundColor)
+    param.edgeColor.forEach((v, i) => param.edgeColor[i] = Clamp(v, 0, 255) / 255);
+    param.backgroundColor.forEach((v, i) => param.backgroundColor[i] = Clamp(v, 0, 255) / 255);
     param.edgeOnly = param.edgeOnly ? 1 : 0;
 
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
     return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
-        gl.uniform1f(gl.getUniformLocation(program, "u_threshold"), param.threshold);
+        gl.uniform1f(gl.getUniformLocation(program, "u_intensity"), param.intensity);
         gl.uniform3fv(gl.getUniformLocation(program, "u_edgeColor"), param.edgeColor);
         gl.uniform3fv(gl.getUniformLocation(program, "u_backgroundColor"), param.backgroundColor);
         gl.uniform1i(gl.getUniformLocation(program, "u_edgeOnly"), param.edgeOnly);
         gl.uniform2f(gl.getUniformLocation(program, "u_textureSize"), gl.drawingBufferWidth, gl.drawingBufferHeight);
+    });
+}
+
+export function BinarizationFilter(gl, param, callback) {
+    const vert = defaultVertexShader;
+    const frag = `#version 300 es
+    precision mediump float;
+    in vec2 v_texCoord;
+    out vec4 fragColor;
+    uniform sampler2D u_image;
+    uniform float u_threshold;
+    void main() {
+        vec4 color = texture(u_image, v_texCoord);
+        float luminance = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+        float binarized = step(u_threshold, luminance);
+        fragColor = vec4(vec3(binarized), 1.0);
+    }
+    `;
+
+    const program = CreateShader(gl, vert, frag);
+    if (param === undefined || Object.values(param).length === 0) {
+        param = {
+            threshold: 0.5
+        }
+    }
+
+    param.threshold = Clamp(param.threshold, 0, 1);
+
+    if (callback !== undefined && typeof callback === "function") {
+        callback(param);
+    }
+
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
+        gl.uniform1f(gl.getUniformLocation(program, "u_threshold"), param.threshold);
     });
 }

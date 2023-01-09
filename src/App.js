@@ -1,38 +1,38 @@
 import './App.css';
-import {
-    BoxBlurFilter,
-    BrightnessFilter,
-    ContrastFilter, EdgeDetectionFilter,
+import WebglCanvas, {
+    BinarizationFilter, BrightnessFilter, ContrastFilter,
+    EdgeDetectionFilter,
     GaussianBlurFilter,
     GetBase64FilterPicture,
-    GrainyBlurFilter, GranTurismoFilter,
-    GreyScaleFilter,
-    HueFilter,
-    RevertFilter,
+    GrainyBlurFilter,
     SaturationFilter,
     TintFilter,
     WaveFilter,
 } from "./Esut";
 import {useEffect, useState} from "react";
+let p = [255, 103, 102];
 
 function App() {
-    const [imgData, setImgData] = useState(null);
-
-    useEffect(() => {
-        GetBase64FilterPicture("./1.png", [
-            {filter: EdgeDetectionFilter},
-        ]).then(r => {
-            setImgData(r);
-        })
-    });
-
     return (<div>
         <div style={{
             width: "100%", height: "100%",
-        }}>
-            <img src={imgData} alt="" style={{
-                objectFit: "cover", width: "100%", height: "100%", position: "fixed",
-            }}/>
+        }} onClick={
+            () => {
+                p[0] = Math.random();
+                p[1] = Math.random();
+                p[2] = Math.random();
+            }
+        }>
+            <WebglCanvas imgUrl="./1.png" filters={[
+                {filter: TintFilter, params: {
+                    tint: p,
+                    }
+                },
+            ]} isStatic={false}
+                         style={{
+                             width: "100%", height: "100%", objectFit: "cover", position: "fixed",
+                         }}
+            />
         </div>
     </div>);
 
