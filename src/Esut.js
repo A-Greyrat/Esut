@@ -91,7 +91,6 @@ export default class WebglCanvas extends React.Component {
     constructor(props) {
         super(props);
         this.canvasRef = React.createRef();
-        this.time = 0;
 
         this.state = {
             imgUrl: this.props.imgUrl, filters: this.props.filters || [], isStatic: this.props.isStatic || false
@@ -118,12 +117,35 @@ export default class WebglCanvas extends React.Component {
 
             if (!this.state.isStatic) this.update();
         }
-
     }
 
     update() {
         this.updateGL();
         requestAnimationFrame(this.update.bind(this));
+    }
+
+    async GetImgData() {
+        this.glCanvas = document.createElement('canvas');
+        this.glCanvas.willReadFrequently = true;
+        this.img = new Image();
+        this.img.src = this.props.imgUrl;
+        await this.img.decode().then(
+            () => {
+                this.glCanvas.width = this.img.width;
+                this.glCanvas.height = this.img.height;
+                this.gl = this.glCanvas.getContext("webgl2");
+
+                this.initGL();
+
+                this.filters = this.state.filters.map((obj) => {
+                    return obj.filter(this.gl, obj.params);
+                });
+
+                this.updateGL();
+            }
+        );
+
+        return this.glCanvas.toDataURL("image/");
     }
 
     render() {
@@ -135,6 +157,7 @@ export default class WebglCanvas extends React.Component {
 
 const defaultVertexShader = `#version 300 es
     precision mediump float;
+    // Notice: 如果需要自定义Vertex, 请确保position和uv输入正确
     in vec2 a_position;
     in vec2 a_texCoord;
     out vec2 v_texCoord;
@@ -225,6 +248,13 @@ function CreateFrameBuffer(gl, width, height) {
     return [frameBuffer, texture];
 }
 
+export async function GetBase64FilterPicture(imgUrl, filters) {
+    const canvas = new WebglCanvas({
+        imgUrl: imgUrl, filters: filters, isStatic: true
+    });
+    return await canvas.GetImgData();
+}
+
 
 /* Filters */
 
@@ -264,7 +294,7 @@ export function WaveFilter(gl, param) {
     let time = 0;
     setInterval(() => time += 1000 / 60, 1000 / 60);
 
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             amplitude: 0.2, frequency: 2, speed: 1,
         }
@@ -319,7 +349,7 @@ export function TintFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
 
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             tint: [1, 1, 1]
         }
@@ -349,7 +379,7 @@ export function BrightnessFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
 
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             brightness: 1
         }
@@ -379,7 +409,7 @@ export function ContrastFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
 
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             contrast: 1
         }
@@ -410,7 +440,7 @@ export function SaturationFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
 
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             saturation: 1
         }
@@ -460,7 +490,7 @@ export function HueFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
 
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             hue: 0
         }
@@ -489,7 +519,7 @@ export function GreyScaleFilter(gl, param) {
     `;
 
     const program = CreateShader(gl, vert, frag);
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             greyScale: 0
         }
@@ -525,8 +555,8 @@ export function BoxBlurFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
     const blitProgram = CreateShader(gl, defaultVertexShader, defaultFragmentShader);
-
-    if (param === null || param === undefined) {
+    console.log(param);
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             radius: 1.6, iterations: 3, downScale: 3
         }
@@ -557,6 +587,7 @@ export function BoxBlurFilter(gl, param) {
     }
 }
 
+// Parameters: radius, iterations, downScale
 export function GaussianBlurFilter(gl, param) {
     const vert = defaultVertexShader;
     const frag = `#version 300 es
@@ -596,7 +627,7 @@ export function GaussianBlurFilter(gl, param) {
     const program = CreateShader(gl, vert, frag);
     const blitProgram = CreateShader(gl, defaultVertexShader, defaultFragmentShader);
 
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
             radius: 1.6, iterations: 3, downScale: 3
         }
@@ -662,9 +693,9 @@ export function GrainyBlurFilter(gl, param) {
 
     const program = CreateShader(gl, vert, frag);
 
-    if (param === null || param === undefined) {
+    if (param === undefined || Object.values(param).length === 0) {
         param = {
-            radius: 1.6, iterations: 3, downScale: 3
+            radius: 16, iterations: 8, downScale: 2
         }
     }
 
