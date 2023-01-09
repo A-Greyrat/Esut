@@ -1,3 +1,10 @@
+/*
+ * Author: Adarion
+ * Description: A simple image processing library based on WebGL.
+ * Version: 0.1
+ * License: MIT
+ */
+
 import React from "react";
 
 export default class WebglCanvas extends React.Component {
@@ -185,8 +192,7 @@ function Blit(gl, src, dst, srcWidth, srcHeight, dstWidth, dstHeight) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 
-function BlitTexture(gl, srcTex, dstFbo, shader, width, height, setUniforms = () => {
-}) {
+function BlitTexture(gl, srcTex, dstFbo, shader, width, height, setUniforms = () => {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
     gl.viewport(0, 0, width, height);
     gl.useProgram(shader);
@@ -721,4 +727,187 @@ export function GrainyBlurFilter(gl, param) {
             Blit(gl, fbo, dstFbo, rtWidth, rtHeight, gl.drawingBufferWidth, gl.drawingBufferHeight);
         }
     };
+}
+
+export function GranTurismoFilter(gl, param) {
+    const vert = defaultVertexShader;
+    const frag = `#version 300 es
+precision mediump float;
+in vec2 v_texCoord;
+out vec4 fragColor;
+
+uniform float u_intensity;
+uniform sampler2D u_image;
+const float e = 2.71828;
+
+float W_f(float x, float e0, float e1)
+{
+    if (x <= e0)
+    return 0.0;
+    if (x >= e1)
+    return 1.0;
+    float a = (x - e0) / (e1 - e0);
+    return a * a * (3.0 - 2.0 * a);
+}
+
+float H_f(float x, float e0, float e1)
+{
+    if (x <= e0)
+    return 0.0;
+    if (x >= e1)
+    return 1.0;
+    return (x - e0) / (e1 - e0);
+}
+
+float GranTurismo(float x)
+{
+    float P = 1.0;
+    float a = 1.0;
+    float m = 0.22;
+    float l = 0.4;
+    float c = 1.33;
+    float b = 0.0;
+    float l0 = (P - m) * l / a;
+    float L0 = m - m / a;
+    float L1 = m + (1.0 - m) / a;
+    float L_x = m + a * (x - m);
+    float T_x = m * pow(x / m, c) + b;
+    float S0 = m + l0;
+    float S1 = m + a * l0;
+    float C2 = a * P / (P - S1);
+    float S_x = P - (P - S1) * pow(e, -(C2 * (x - S0) / P));
+    float w0_x = 1.0 - W_f(x, 0.0, m);
+    float w2_x = H_f(x, m + l0, m + l0);
+    float w1_x = 1.0 - w0_x - w2_x;
+    float f_x = T_x * w0_x + L_x * w1_x + S_x * w2_x;
+    return f_x;
+}
+
+vec4 GranTurismo(vec4 x)
+{
+    vec4 color = vec4(GranTurismo(x.r), GranTurismo(x.g), GranTurismo(x.b), x.a);
+    return mix(x, color, u_intensity);
+}
+
+
+void main() {
+    vec4 color = texture(u_image, v_texCoord);
+    fragColor = GranTurismo(color);
+}
+    `;
+
+    const program = CreateShader(gl, vert, frag);
+    if (param === undefined || Object.values(param).length === 0) {
+        param = {
+            intensity: 1
+        }
+    }
+
+    param.intensity = param.intensity > 1 ? 1 : param.intensity < 0 ? 0 : param.intensity; // clamp(0, 1, intensity)
+
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
+        gl.uniform1f(gl.getUniformLocation(program, "u_intensity"), param.intensity);
+    });
+}
+
+export function EdgeDetectionFilter(gl, param) {
+    // Sobel算子
+    const vert = `#version 300 es
+    precision mediump float;
+    in vec2 a_position;
+    in vec2 a_texCoord;
+    out vec2 v_texCoord;
+    out vec2[9] v_uv;
+    
+    uniform vec2 u_textureSize;
+    
+    void main() {
+        v_texCoord = vec2(a_texCoord.x, a_texCoord.y);
+        gl_Position = vec4(a_position.xy, 0.0, 1.0);
+        
+        vec2 texel = vec2(1.0 / u_textureSize.x, 1.0 / u_textureSize.y);
+        v_uv[0] = v_texCoord + texel * vec2(-1.0, -1.0);
+        v_uv[1] = v_texCoord + texel * vec2( 0.0, -1.0);
+        v_uv[2] = v_texCoord + texel * vec2( 1.0, -1.0);
+        v_uv[3] = v_texCoord + texel * vec2(-1.0,  0.0);
+        v_uv[4] = v_texCoord + texel * vec2( 0.0,  0.0);
+        v_uv[5] = v_texCoord + texel * vec2( 1.0,  0.0);
+        v_uv[6] = v_texCoord + texel * vec2(-1.0,  1.0); 
+        v_uv[7] = v_texCoord + texel * vec2( 0.0,  1.0);
+        v_uv[8] = v_texCoord + texel * vec2( 1.0,  1.0);
+    }
+`;
+    const frag = `#version 300 es
+    precision mediump float;
+    in vec2 v_texCoord;
+    in vec2[9] v_uv;
+    
+    out vec4 fragColor;
+    
+    uniform sampler2D u_image;
+    uniform float u_threshold;
+    uniform vec3 u_edgeColor;
+    uniform vec3 u_backgroundColor;
+    uniform int u_edgeOnly;
+    
+    float luminance(vec3 color) {
+        return dot(color, vec3(0.2126, 0.7152, 0.0722));
+    }
+    
+    float sobel() {
+        const float gx[9] = float[9](
+            -1.0, 0.0, 1.0,
+            -2.0, 0.0, 2.0,
+            -1.0, 0.0, 1.0
+        );
+        
+        const float gy[9] = float[9](
+            -1.0, -2.0, -1.0,
+            0.0, 0.0, 0.0,
+            1.0, 2.0, 1.0
+        );
+        
+        float color = 0.0, edgeX = 0.0, edgeY = 0.0;
+        
+        for (int i = 0; i < 9; i++) {
+            color = luminance(texture(u_image, v_uv[i]).rgb);
+            edgeX += color * gx[i];
+            edgeY += color * gy[i];
+        }
+        
+        return 1.0 - sqrt(edgeX * edgeX + edgeY * edgeY);
+    }
+    
+    void main() {
+        float edge = sobel();
+        vec3 color = texture(u_image, v_texCoord).rgb;
+        vec3 withEdgeColor = mix(mix(u_edgeColor, color, edge), color, 1.0 - u_threshold);
+        vec3 onlyEdgeColor = mix(u_edgeColor, u_backgroundColor, edge);
+        
+        fragColor = vec4(mix(withEdgeColor, onlyEdgeColor, float(u_edgeOnly)), 1.0);
+    }
+    `;
+
+    const program = CreateShader(gl, vert, frag);
+    if (param === undefined || Object.values(param).length === 0) {
+        param = {
+            threshold: 0.5,
+            edgeColor: [0, 0, 0],
+            backgroundColor: [1, 1, 1],
+            edgeOnly: true
+        }
+    }
+
+    param.threshold = param.threshold > 1 ? 1 : param.threshold < 0 ? 0 : param.threshold; // clamp(0, 1, threshold)
+    param.edgeColor = param.edgeColor.map(v => v > 1 ? 1 : v < 0 ? 0 : v); // clamp(0, 1, edgeColor)
+    param.backgroundColor = param.backgroundColor.map(v => v > 1 ? 1 : v < 0 ? 0 : v); // clamp(0, 1, backgroundColor)
+    param.edgeOnly = param.edgeOnly ? 1 : 0;
+
+    return (srcTexture, dstFbo) => BlitTexture(gl, srcTexture, dstFbo, program, gl.drawingBufferWidth, gl.drawingBufferHeight, () => {
+        gl.uniform1f(gl.getUniformLocation(program, "u_threshold"), param.threshold);
+        gl.uniform3fv(gl.getUniformLocation(program, "u_edgeColor"), param.edgeColor);
+        gl.uniform3fv(gl.getUniformLocation(program, "u_backgroundColor"), param.backgroundColor);
+        gl.uniform1i(gl.getUniformLocation(program, "u_edgeOnly"), param.edgeOnly);
+        gl.uniform2f(gl.getUniformLocation(program, "u_textureSize"), gl.drawingBufferWidth, gl.drawingBufferHeight);
+    });
 }
